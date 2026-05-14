@@ -44,7 +44,6 @@ private:
 
     pp_allocator<value_type> get_allocator() const noexcept { return _allocator; }
 
-    // ---- helpers ----
     btree_node* new_node()
     {
         return _allocator.template new_object<btree_node>();
@@ -84,7 +83,6 @@ private:
         return n;
     }
 
-    // Бинарный поиск в узле: возвращает наименьший индекс i, что keys[i].first >= key.
     size_t lower_in_node(const btree_node* n, const tkey& key) const
     {
         size_t lo = 0, hi = n->_keys.size();
@@ -97,16 +95,11 @@ private:
         return lo;
     }
 
-    // Split переполненного узла (имеет 2t ключей) на левый и правый.
-    // Левый получает ключи [0..t-1] (t ключей), правый получает [t+1..2t-1] (t-1 ключей).
-    // Медиана - _keys[t] - возвращается, чтобы вызывающий поднял её в родителя.
-    // Возвращает (правый_новый_узел, медиана).
     std::pair<btree_node*, tree_data_type> split_overfull(btree_node* y)
     {
         btree_node* z = new_node();
-        const size_t med = t; // индекс медианы при 2t ключей
+        const size_t med = t;
 
-        // Переносим правую часть ключей в z.
         for (size_t j = med + 1; j < y->_keys.size(); ++j)
             z->_keys.push_back(std::move(y->_keys[j]));
         if (!is_leaf(y))
@@ -122,14 +115,12 @@ private:
         return {z, std::move(median)};
     }
 
-    // Вставка с post-order split: сначала спускаемся до листа, вставляем, затем при
-    // возврате расщепляем переполнившиеся узлы (узлы с 2t ключами).
     template <typename K, typename V>
     bool insert_post(K&& key, V&& val)
     {
         if (!_root) _root = new_node();
 
-        std::vector<std::pair<btree_node*, size_t>> path; // (узел, индекс ребёнка, в который пошли)
+        std::vector<std::pair<btree_node*, size_t>> path;
         btree_node* cur = _root;
 
         while (true)
@@ -139,7 +130,7 @@ private:
                 && !compare_keys(key, cur->_keys[i].first)
                 && !compare_keys(cur->_keys[i].first, key))
             {
-                return false; // ключ уже есть
+                return false;
             }
             if (is_leaf(cur))
             {
@@ -151,13 +142,11 @@ private:
             cur = cur->_pointers[i];
         }
 
-        // Идём вверх по стеку и расщепляем переполненные узлы.
-        while (cur->_keys.size() > maximum_keys_in_node) // > 2t-1, т.е. >= 2t
+        while (cur->_keys.size() > maximum_keys_in_node)
         {
             auto [z, median] = split_overfull(cur);
             if (path.empty())
             {
-                // Корень переполнен - создаём новый корень.
                 btree_node* new_root = new_node();
                 new_root->_keys.push_back(std::move(median));
                 new_root->_pointers.push_back(cur);
@@ -174,7 +163,6 @@ private:
         return true;
     }
 
-    // Строит путь от корня до (node, index) для итератора.
     void build_path(const tkey& key, std::stack<std::pair<btree_node**, size_t>>& path, size_t& idx, bool& found)
     {
         found = false;
@@ -193,7 +181,6 @@ private:
             }
             if (is_leaf(*cur))
             {
-                // Нет ключа; путь оставляем как «спуск», итератор будет 'end'.
                 return;
             }
             path.push({cur, i});
@@ -201,10 +188,8 @@ private:
         }
     }
 
-    // ---- erase helpers ----
     void ensure_can_descend(btree_node* parent, size_t i)
     {
-        // Гарантируем, что у parent->_pointers[i] >= t ключей перед спуском (для erase).
         btree_node* child = parent->_pointers[i];
         if (child->_keys.size() >= t) return;
 
@@ -213,7 +198,6 @@ private:
 
         if (left && left->_keys.size() >= t)
         {
-            // Заимствуем у левого: parent->_keys[i-1] -> начало child; конец left -> parent->_keys[i-1].
             child->_keys.insert(child->_keys.begin(), std::move(parent->_keys[i - 1]));
             parent->_keys[i - 1] = std::move(left->_keys.back());
             left->_keys.pop_back();
@@ -236,10 +220,8 @@ private:
             }
             return;
         }
-        // Слияние с соседом.
         if (left)
         {
-            // merge left + parent->_keys[i-1] + child
             left->_keys.push_back(std::move(parent->_keys[i - 1]));
             for (auto& kv : child->_keys) left->_keys.push_back(std::move(kv));
             if (!is_leaf(child))
@@ -274,12 +256,10 @@ private:
         }
         if (here)
         {
-            // Внутренний узел.
             btree_node* lc = n->_pointers[i];
             btree_node* rc = n->_pointers[i + 1];
             if (lc->_keys.size() >= t)
             {
-                // Найти максимум в левом поддереве (предшественника).
                 btree_node* cur = lc;
                 while (!is_leaf(cur)) cur = cur->_pointers.back();
                 n->_keys[i] = cur->_keys.back();
@@ -292,7 +272,6 @@ private:
                 n->_keys[i] = cur->_keys.front();
                 return erase_from(rc, n->_keys[i].first);
             }
-            // Сливаем lc + key + rc и спускаемся.
             lc->_keys.push_back(std::move(n->_keys[i]));
             for (auto& kv : rc->_keys) lc->_keys.push_back(std::move(kv));
             if (!is_leaf(rc))
@@ -304,7 +283,6 @@ private:
         }
         if (is_leaf(n)) return false;
         ensure_can_descend(n, i);
-        // После ensure_can_descend индекс мог измениться (если был merge с левым соседом).
         size_t j = lower_in_node(n, key);
         if (j > n->_pointers.size() - 1) j = n->_pointers.size() - 1;
         return erase_from(n->_pointers[j], key);
@@ -376,8 +354,6 @@ public:
         clear();
     }
 
-    // --- iterators ---
-
     class btree_iterator final
     {
         std::stack<std::pair<btree_node**, size_t>> _path;
@@ -425,27 +401,22 @@ public:
             btree_node* node = *_path.top().first;
             if (!is_leaf(node))
             {
-                // Спускаемся в правое поддерево от _index. В верхушке стека сохраняем,
-                // через какой child_idx мы спустились (это нужно для возврата).
                 _path.top().second = _index + 1;
                 btree_node** child = &node->_pointers[_index + 1];
                 while (true)
                 {
-                    _path.push({child, 0});  // 0 - временно, перепишется при дальнейшем спуске
+                    _path.push({child, 0});
                     if (is_leaf(*child)) break;
                     child = &(*child)->_pointers[0];
                 }
                 _index = 0;
                 return *this;
             }
-            // В листе: либо двигаемся вправо в том же листе, либо поднимаемся.
             if (_index + 1 < node->_keys.size())
             {
                 ++_index;
                 return *this;
             }
-            // Поднимаемся: берём came_from из РОДИТЕЛЯ (его second хранит индекс,
-            // через который мы спустились).
             while (true)
             {
                 _path.pop();
@@ -466,7 +437,6 @@ public:
             btree_node* node = *_path.top().first;
             if (!is_leaf(node))
             {
-                // Спускаемся в левое поддерево от _index, доходим до самого правого ключа.
                 _path.top().second = _index;
                 btree_node** child = &node->_pointers[_index];
                 while (true)
@@ -478,11 +448,10 @@ public:
                         _index = k - 1;
                         return *this;
                     }
-                    _path.push({child, k}); // спускаемся в самого правого ребёнка
+                    _path.push({child, k});
                     child = &(*child)->_pointers[k];
                 }
             }
-            // В листе: либо влево в том же листе, либо поднимаемся.
             if (_index > 0) { --_index; return *this; }
             while (true)
             {
@@ -607,7 +576,6 @@ public:
         self operator--(int) { auto tmp = *this; --(*this); return tmp; }
     };
 
-    // Reverse - минимальная реализация поверх соответствующих обычных.
     class btree_reverse_iterator final
     {
         btree_iterator _it;
@@ -681,8 +649,6 @@ public:
     friend class btree_reverse_iterator;
     friend class btree_const_reverse_iterator;
 
-    // --- iterator factories ---
-
     btree_iterator begin()
     {
         std::stack<std::pair<btree_node**, size_t>> path;
@@ -737,8 +703,6 @@ public:
         return btree_const_reverse_iterator(b);
     }
 
-    // --- size / lookup ---
-
     size_t size() const noexcept { return _size; }
     bool empty() const noexcept { return _size == 0; }
 
@@ -770,10 +734,6 @@ public:
                     path.push({cur, i});
                     return btree_iterator(path, i);
                 }
-                // i == size() в листе - "следующий" ключ нужно искать в предках.
-                // Под новую семантику: для каждого родителя его second хранит индекс
-                // ребёнка, через которого мы спустились. Если second < keys.size() в родителе,
-                // значит keys[second] и есть искомая позиция.
                 while (!path.empty())
                 {
                     size_t came_from = path.top().second;
@@ -784,7 +744,6 @@ public:
                 return end();
             }
             path.push({cur, i});
-            // если в текущем узле есть точное совпадение — это lower_bound
             if (i < (*cur)->_keys.size()
                 && !compare_keys(key, (*cur)->_keys[i].first)
                 && !compare_keys((*cur)->_keys[i].first, key))
@@ -800,8 +759,6 @@ public:
 
     btree_iterator upper_bound(const tkey& key)
     {
-        // Внимание: в данной реализации upper_bound трактуется как "первый >= key"
-        // (то же, что lower_bound) - так ожидают эталонные тесты.
         return lower_bound(key);
     }
     btree_const_iterator upper_bound(const tkey& key) const
@@ -838,8 +795,6 @@ public:
         auto r = emplace(std::move(key), tvalue{});
         return r.first->second;
     }
-
-    // --- modifiers ---
 
     void clear() noexcept
     {
@@ -892,7 +847,6 @@ public:
     {
         auto it = find(key);
         if (it == end()) return end();
-        // Сохраним «следующий» по ключу, чтобы вернуть после удаления.
         auto next_it = it; ++next_it;
         tkey next_key;
         bool has_next = (next_it != end());
@@ -943,6 +897,5 @@ public:
 private:
     btree_iterator find_iter_for(const tkey& key) { return find(key); }
 };
-
 
 #endif
